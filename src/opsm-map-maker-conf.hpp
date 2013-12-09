@@ -120,6 +120,13 @@ namespace opsm {
 				"scan matching map file with BMP (for human)"
 		};
 
+		// occupancy-grid-map
+		static const gnd::conf::parameter<bool> ConfIni_Occupancy = {
+				"occupancy-grid-map",
+				false,		// file name
+				"scan matching map file with BMP (for human)"
+		};
+
 
 		// laser point log
 		static const gnd::conf::parameter_array<char, 256> ConfIni_LaserPointLog = {
@@ -207,6 +214,7 @@ namespace opsm {
 			gnd::conf::parameter<double>			pause_orient;		///< resting threshold (position orientation) [deg]
 
 			gnd::conf::parameter_array<char, 256>	opsm_map;			///< opsm map directory
+			gnd::conf::parameter<bool>				occ_map;			///< occupancy grid map
 			gnd::conf::parameter<bool>				bmp;				///< opsm map (bmp)
 
 			gnd::conf::parameter_array<char, 256>	laserpoint_log;		///< laser point log
@@ -248,12 +256,13 @@ namespace opsm {
 			::memcpy(&conf->culling,			&ConfIni_Culling,				sizeof(ConfIni_Culling) );
 			::memcpy(&conf->use_range_dist,		&ConfIni_LaserUseDist,			sizeof(ConfIni_LaserUseDist) );
 			::memcpy(&conf->use_range_orient,	&ConfIni_LaserUseOrient,		sizeof(ConfIni_LaserUseOrient) );
-			::memcpy(&conf->pause_time,			&ConfIni_PauseCycle,				sizeof(ConfIni_PauseCycle) );
+			::memcpy(&conf->pause_time,			&ConfIni_PauseCycle,			sizeof(ConfIni_PauseCycle) );
 			::memcpy(&conf->pause_dist,			&ConfIni_PauseDist,				sizeof(ConfIni_PauseDist) );
 			::memcpy(&conf->pause_orient,		&ConfIni_PauseOrient,			sizeof(ConfIni_PauseOrient) );
 
 			::memcpy(&conf->opsm_map,			&ConfIni_OPSMMap,				sizeof(ConfIni_OPSMMap) );
 			::memcpy(&conf->bmp,				&ConfIni_BMP,					sizeof(ConfIni_BMP) );
+			::memcpy(&conf->occ_map,			&ConfIni_Occupancy,				sizeof(ConfIni_Occupancy) );
 
 			::memcpy(&conf->laserpoint_log,		&ConfIni_LaserPointLog,			sizeof(ConfIni_LaserPointLog) );
 			::memcpy(&conf->output_dir,			&ConfIni_OutputDir,				sizeof(ConfIni_OutputDir) );
@@ -284,6 +293,7 @@ namespace opsm {
 
 			gnd::conf::get_parameter( src, &dest->opsm_map );
 			gnd::conf::get_parameter( src, &dest->bmp );
+			gnd::conf::get_parameter( src, &dest->occ_map );
 
 			gnd::conf::get_parameter( src, &dest->pos_name );
 			gnd::conf::get_parameter( src, &dest->odm_id );
@@ -330,6 +340,7 @@ namespace opsm {
 
 				gnd::conf::set_parameter(dest, &src->opsm_map );
 				gnd::conf::set_parameter(dest, &src->bmp );
+				gnd::conf::set_parameter(dest, &src->occ_map );
 
 				gnd::conf::set_parameter(dest, &src->init_map);
 

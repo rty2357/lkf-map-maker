@@ -32,6 +32,14 @@
 static const double ShowCycle = gnd_sec2time(1.0);
 static const double ClockCycle = gnd_sec2time(1.0) / 1000.0 ;
 
+static const double OccGridSize= gnd_m2dist(0.05);
+static const double OccError = gnd_m2dist(0.15);
+static const double OccPf = 0.55;
+static const double OccLf = ::log( (1.0- OccPf) / OccPf );
+static const double OccPo = 0.55;
+static const double OccLo = ::log( OccPo / (1.0- OccPo) );
+
+
 int main(int argc, char* argv[]) {
 	gnd::opsm::cmap_t			cnt_smmap;			// probabilistic scan matching counting map
 
@@ -47,6 +55,8 @@ int main(int argc, char* argv[]) {
 	gnd::cui_reader gcui;							// cui manager
 
 	gnd::odometry::cmap cmap;
+
+	gnd::gridmap::gridplane<double>	occ_map;	// occupancy grid map
 
 	opsm_mm::proc_configuration pconf;			// configuration parameter
 	opsm_mm::options popt(&pconf);				// process option analyze class
@@ -120,6 +130,11 @@ int main(int argc, char* argv[]) {
 
 		} // <--- load odometry initial map
 
+		// ---> initialize occupany grid map
+		if ( !::is_proc_shutoff() && pconf.occ_map.value) {
+			occ_map.pallocate(gnd_m2dist(5), gnd_m2dist(5), OccGridSize, OccGridSize);
+			occ_map.pset_core(gnd_m2dist(0.0), gnd_m2dist(0.0));
+		} // ---> initialize occupany grid map
 
 		// ---> initialize ssm
 		if(!::is_proc_shutoff()){
@@ -257,19 +272,13 @@ int main(int argc, char* argv[]) {
 		}
 
 		// set cui command
-		gcui.set_command(opsm_mm::cui_cmd, sizeof(opsm_mm::cui_cmd) / sizeof(opsm_mm::cui_cmd[0]));
-
+		if ( !::is_proc_shutoff() ){
+			gcui.set_command(opsm_mm::cui_cmd, sizeof(opsm_mm::cui_cmd) / sizeof(opsm_mm::cui_cmd[0]));
+		}
 
 		// fin of initialization
 		::fprintf(stderr, "\n\n");
 	} // <--- initialization
-
-
-
-
-
-
-
 
 
 
@@ -313,7 +322,6 @@ int main(int argc, char* argv[]) {
 
 		{ // ---> timer
 			// set parameter-cycle
-			timer_show.begin(CLOCK_REALTIME, ShowCycle, -ShowCycle);
 			nline_show = 0;
 			timer_show.begin(CLOCK_REALTIME, ShowCycle, -ShowCycle);
 		} // <--- timer
@@ -437,6 +445,20 @@ int main(int argc, char* argv[]) {
 						gnd::vector::fixed_column<4> reflect_csns;
 						gnd::vector::fixed_column<4> reflect_cgl;
 						gnd::vector::fixed_column<4> reflect_prev;
+						gnd::vector::fixed_column<4> origin_cgl;
+
+						{ // ---> compute origin point position on global coordinate
+							gnd::vector::fixed_column<4> origin_csns;
+
+							// set search position on sensor-coordinate
+							origin_csns[0] = 0;
+							origin_csns[1] = 0;
+							origin_csns[2] = 0;
+							origin_csns[3] = 1;
+
+							// convert from sensor coordinate to global coordinate
+							gnd::matrix::prod(&coordm_sns2gl, &origin_csns, &origin_cgl);
+						} // <--- compute origin point position on global coordinate
 
 						// ---> scanning loop of laser scanner reading
 						for(size_t i = 0; i < ssm_sokuikiraw.data.numPoints(); i++){
@@ -453,10 +475,9 @@ int main(int argc, char* argv[]) {
 							else if( pconf.use_range_orient.value > 0 && ssm_sokuikiraw.data[i].th > pconf.use_range_orient.value )	continue;
 
 
-
 							{ // ---> compute reflection point position on global coordinate
 								// set search position on sensor-coordinate
-								gnd::matrix::set(&reflect_csns, 0, 0, ssm_sokuikiraw.data[i].r * ::cos( ssm_sokuikiraw.data[i].th ));
+								gnd::matrix::set(&reflect_csns, 0, 0, ssm_sokuikiraw.data[i].r * ::cos( ssm_sokuikiraw.data[i].th ) );
 								gnd::matrix::set(&reflect_csns, 1, 0, ssm_sokuikiraw.data[i].r * ::sin( ssm_sokuikiraw.data[i].th ) );
 								gnd::matrix::set(&reflect_csns, 2, 0, 0);
 								gnd::matrix::set(&reflect_csns, 3, 0, 1);
@@ -472,10 +493,36 @@ int main(int argc, char* argv[]) {
 
 								// convert from sensor coordinate to global coordinate
 								gnd::matrix::prod(&coordm_sns2gl, &reflect_csns, &reflect_cgl);
-							} // <--- compute laser scanner reading position on global coordinate
+							} // <--- compute reflection point position on global coordinate
+
 
 							// add scan point to map
 							gnd::opsm::counting_map(&cnt_smmap, reflect_cgl[0], reflect_cgl[1]);
+
+							if( pconf.occ_map.value ){ // ---> update occupancy grid map
+								double *ppxl;
+								double *prev_ppxl = 0;
+								size_t n = (ssm_sokuikiraw.data[i].r / OccGridSize);
+								if( n > 0 ) {
+									double ux = (reflect_cgl[0] - origin_cgl[0]) / n;
+									double uy = (reflect_cgl[1] - origin_cgl[1]) / n;
+									n = ( (ssm_sokuikiraw.data[i].r + OccError) / OccGridSize);
+									for(double j = 0; j <= n + 1; j++) {
+										double xpxl = origin_cgl[0] + ux * j;
+										double ypxl = origin_cgl[1] + uy * j;
+
+										for( ppxl = occ_map.ppointer(xpxl, ypxl);
+												ppxl == 0;
+												ppxl = occ_map.ppointer(xpxl, ypxl) ){
+											occ_map.reallocate(xpxl, ypxl);
+										}
+
+										if( ppxl == prev_ppxl ) continue;
+										if( ( (OccGridSize * j) - ssm_sokuikiraw.data[i].r) < (-OccError) )		*ppxl += OccLf;
+										if( ::fabs(OccGridSize * j - ssm_sokuikiraw.data[i].r) < OccGridSize )	*ppxl += OccLo;
+									}
+								}
+							}// <--- update occupancy grid map
 
 							// log
 							if( llog_fp )	::fprintf(llog_fp, "%lf %lf\n", reflect_cgl[0], reflect_cgl[1]);
@@ -496,14 +543,18 @@ int main(int argc, char* argv[]) {
 	{ // ---> finalization
 		gnd::opsm::map_t smmap;
 		if(llog_fp) ::fclose(llog_fp);
+		::fprintf(stderr, "==========Finalize==========\n");
 
+		::fprintf(stderr, "  => end SSM\n");
 		ssm_pos.close();
 		ssm_sokuikiraw.close();
 		::endSSM();
+		::fprintf(stderr, "    ...fin\n");
 
 
 		// ---> build map
-		gnd::opsm::build_map(&smmap, &cnt_smmap, gnd_mm2dist(10), gnd_m2dist(20), 1);
+		::fprintf(stderr, "  => build opsm map\n");
+		gnd::opsm::build_map(&smmap, &cnt_smmap, gnd_mm2dist(10), gnd_m2dist(20));
 
 		if( pconf.opsm_map.value[0] ){ // ---> write opsm map
 			char dname[512];
@@ -590,7 +641,7 @@ int main(int argc, char* argv[]) {
 		if( pconf.bmp.value ) { // ---> bmp (8bit)
 			gnd::bmp8_t bmp8;
 
-			gnd::opsm::build_bmp8(&bmp8, &smmap, gnd_m2dist( 1.0 / 10));
+			gnd::opsm::build_bmp8(&bmp8, &smmap, gnd_m2dist( 1.0 / 20));
 			{ // ---> bmp
 				char fname[512];
 				::fprintf(stderr, " => write psm-image in bmp(8bit)\n");
@@ -622,6 +673,57 @@ int main(int argc, char* argv[]) {
 				fclose(fp);
 			} // --->  origin
 		} // ---> bmp (8bit)
+
+
+
+		if( pconf.occ_map.value ){ // ---> output occupancy grid map
+			gnd::bmp8_t bmp8;
+			bmp8.allocate(occ_map.row(), occ_map.column());
+			bmp8.pset_rsl(occ_map.xrsl(), occ_map.yrsl() );
+
+			for( unsigned long r = 0; r < bmp8.row(); r++ ){
+				for( unsigned long c = 0; c < bmp8.column(); c++ ){
+					double dv = 1.0 - 1.0 / ::exp( 1.0 - occ_map.value(r,c) );
+					unsigned char cv;
+					if( dv > 1.0) 	cv = 0xff;
+					else			cv = dv * 0xff;
+					bmp8.set(r,c,&cv);
+				}
+			}
+
+			{ // ---> bmp
+				char fname[512];
+				::fprintf(stderr, " => write occupancy grid map in bmp(8bit)\n");
+
+				if( ::snprintf(fname, sizeof(fname), "%s/%s.%s", pconf.output_dir.value, "occ", "bmp" ) == sizeof(fname) ){
+					::fprintf(stderr, "  ... \x1b[1m\x1b[31mError\x1b[39m\x1b[0m: fail to open. file name is too long\n");
+				}
+				else if( gnd::bmp::write8(fname, &bmp8) < 0) {
+					::fprintf(stderr, "  ... \x1b[1m\x1b[31mError\x1b[39m\x1b[0m: fail to open \"\x1b[4m%s\x1b[0m\"\n", fname);
+				}
+				else {
+					::fprintf(stderr, "  ... \x1b[1mOK\x1b[0m: save map data into \"\x1b[4m%s\x1b[0m\"\n", fname);
+				}
+			} // <--- bmp
+
+
+			{ // ---> origin
+				char fname[512];
+				FILE *fp = 0;
+				double x, y;
+
+				if( ::snprintf(fname, sizeof(fname), "%s/%s.%s", pconf.output_dir.value, "occ", "origin.txt"  ) == sizeof(fname) ){
+					::fprintf(stderr, "  ... \x1b[1m\x1b[31mError\x1b[39m\x1b[0m: fail to open. file name is too long\n");
+				}
+				else if( !(fp = fopen(fname, "w")) ) {
+					::fprintf(stderr, "  ... \x1b[1m\x1b[31mError\x1b[39m\x1b[0m: fail to open \"\x1b[4m%s\x1b[0m\"\n", fname);
+				}
+				occ_map.pget_origin(&x, &y);
+				fprintf(fp, "%lf %lf\n", x, y);
+				fclose(fp);
+			} // --->  origin
+
+		} // <--- output occupancy grid map
 
 
 		::fprintf(stderr, "\n");
