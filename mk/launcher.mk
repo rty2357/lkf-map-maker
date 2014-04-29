@@ -12,7 +12,7 @@ LAUNCHER_INC		:=launcher.opt
 LAUNCH_OPTION_TAG	:=OPTION
 
 #lanch config
-LAUNCH_CONFIG		:=opsm-map-maker.conf
+LAUNCH_CONFIG		:=lkf-map-maker.conf
 
 #lanch option
 LAUNCH_OPTION		:=
