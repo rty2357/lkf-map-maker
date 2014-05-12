@@ -62,7 +62,7 @@ namespace lkf {
 		const struct option LongOpt[] = {
 				{"help", 							no_argument,		0,	'h'},
 				{"config",							required_argument,	0,	'g'},
-				{"write-config",					required_argument,	0,	'G'},
+				{"write-config",					optional_argument,	0,	'G'},
 				{ConfIni_InitialMapDir.item,		required_argument,	0,	'm'},
 				{ConfIni_LaserScannerSSMName.item,	required_argument,	0,	'S'},
 				{ConfIni_PositionSSMName.item,		required_argument,	0,	'O'},

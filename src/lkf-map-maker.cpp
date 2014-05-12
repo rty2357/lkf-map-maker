@@ -32,13 +32,6 @@
 static const double ShowCycle = gnd_sec2time(1.0);
 static const double ClockCycle = gnd_sec2time(1.0) / 1000.0 ;
 
-static const double OccGridSize= gnd_m2dist(0.05);
-static const double OccError = gnd_m2dist(0.15);
-static const double OccPf = 0.6;
-static const double OccLf = ::log( (1.0- OccPf) / OccPf );
-static const double OccPo = 0.6;
-static const double OccLo = ::log( OccPo / (1.0- OccPo) );
-
 
 int main(int argc, char* argv[]) {
 	gnd::lkf::cmap_t			cnt_smmap;			// probabilistic scan matching counting map
@@ -56,7 +49,9 @@ int main(int argc, char* argv[]) {
 
 	gnd::odometry::cmap cmap;
 
-	gnd::gridmap::gridplane<double>	occ_map;	// occupancy grid map
+	gnd::gridmap::gridplane<double>	occ_map;		// occupancy grid map
+	double occ_occupiedprob_log = 0;
+	double occ_freeprob_log = 0;
 
 	lkf::map_maker::proc_configuration pconf;			// configuration parameter
 	lkf::map_maker::options popt(&pconf);				// process option analyze class
@@ -111,7 +106,7 @@ int main(int argc, char* argv[]) {
 		} // <--- show initialize task
 
 
-		// ---> load odometry initial map
+		// ---> load initial map
 		if( !::is_proc_shutoff() ) {
 			if ( *pconf.init_map.value ){
 				::fprintf(stderr, "\n");
@@ -128,12 +123,15 @@ int main(int argc, char* argv[]) {
 
 			}
 
-		} // <--- load odometry initial map
+		} // <--- load initial map
 
 		// ---> initialize occupany grid map
 		if ( !::is_proc_shutoff() && pconf.occ_map.value) {
-			occ_map.pallocate(gnd_m2dist(5), gnd_m2dist(5), OccGridSize, OccGridSize);
+			occ_map.pallocate(gnd_m2dist(5), gnd_m2dist(5), pconf.occ_pixelsize.value, pconf.occ_pixelsize.value);
 			occ_map.pset_core(gnd_m2dist(0.0), gnd_m2dist(0.0));
+
+			occ_occupiedprob_log = ::log( pconf.occ_occupiedprob.value / (1.0 - pconf.occ_occupiedprob.value) );
+			occ_freeprob_log = ::log( (1.0 - pconf.occ_freeprob.value) / pconf.occ_freeprob.value );
 		} // ---> initialize occupany grid map
 
 		// ---> initialize ssm
@@ -316,7 +314,7 @@ int main(int argc, char* argv[]) {
 
 		// ---> memory allocate counting map
 		if( !cnt_smmap.plane[0].is_allocate() ){
-			gnd::lkf::init_counting_map(&cnt_smmap, 1.0, 10);
+			gnd::lkf::init_counting_map(&cnt_smmap, pconf.lkf_countercellsize.value, 5.0);
 		} // <--- memory allocate counting map
 
 
@@ -390,11 +388,11 @@ int main(int argc, char* argv[]) {
 				nline_show++; ::fprintf(stderr, "\x1b[K        position : %4.03lf[m], %4.03lf[m], %4.02lf[deg]\n",
 						ssm_pos.data.x, ssm_pos.data.y, gnd_ang2deg( ssm_pos.data.theta ) );
 				nline_show++; ::fprintf(stderr, "\x1b[K      map update : %d\n", cnt_mapupdate );
-				if( pconf.use_range_dist.value > 0){
-					nline_show++; ::fprintf(stderr, "\x1b[K*      use range : %lf [m]\n", pconf.use_range_dist.value );
+				if( pconf.range_dist.value > 0){
+					nline_show++; ::fprintf(stderr, "\x1b[K*      use range : %lf [m]\n", pconf.range_dist.value );
 				}
-				if( pconf.use_range_orient.value > 0){
-					nline_show++; ::fprintf(stderr, "\x1b[K*      use range : %lf [deg]\n", pconf.use_range_orient.value );
+				if( pconf.range_orient.value > 0){
+					nline_show++; ::fprintf(stderr, "\x1b[K*      use range : %lf [deg]\n", pconf.range_orient.value );
 				}
 				nline_show++; ::fprintf(stderr, "\x1b[K\n");
 				nline_show++; ::fprintf(stderr, "\x1b[K Push \x1b[1mEnter\x1b[0m to change CUI Mode\n");
@@ -471,8 +469,8 @@ int main(int argc, char* argv[]) {
 							else if( ssm_sokuikiraw.data[i].isError()) 	continue;
 							else if( ssm_sokuikiraw.data[i].r < ssm_sokuikiraw.property.distMin)	continue;
 							else if( ssm_sokuikiraw.data[i].r > ssm_sokuikiraw.property.distMax)	continue;
-							else if( pconf.use_range_dist.value > 0 && ssm_sokuikiraw.data[i].r > pconf.use_range_dist.value )		continue;
-							else if( pconf.use_range_orient.value > 0 && ssm_sokuikiraw.data[i].th > pconf.use_range_orient.value )	continue;
+							else if( pconf.range_dist.value > 0 && ssm_sokuikiraw.data[i].r > pconf.range_dist.value )		continue;
+							else if( pconf.range_orient.value > 0 && ssm_sokuikiraw.data[i].th > pconf.range_orient.value )	continue;
 
 
 							{ // ---> compute reflection point position on global coordinate
@@ -502,11 +500,11 @@ int main(int argc, char* argv[]) {
 							if( pconf.occ_map.value ){ // ---> update occupancy grid map
 								double *ppxl;
 								double *prev_ppxl = 0;
-								size_t n = (ssm_sokuikiraw.data[i].r / OccGridSize);
+								size_t n = (ssm_sokuikiraw.data[i].r / occ_map.xrsl());
 								if( n > 0 ) {
 									double ux = (reflect_cgl[0] - origin_cgl[0]) / n;
 									double uy = (reflect_cgl[1] - origin_cgl[1]) / n;
-									n = ( (ssm_sokuikiraw.data[i].r + OccError) / OccGridSize);
+									n = ( (ssm_sokuikiraw.data[i].r + pconf.occ_measurementerror.value) / occ_map.xrsl());
 									for(double j = 0; j <= n + 1; j++) {
 										double xpxl = origin_cgl[0] + ux * j;
 										double ypxl = origin_cgl[1] + uy * j;
@@ -518,8 +516,8 @@ int main(int argc, char* argv[]) {
 										}
 
 										if( ppxl == prev_ppxl ) continue;
-										if( ( (OccGridSize * j) - ssm_sokuikiraw.data[i].r) < (-OccError) )		*ppxl += OccLf;
-										if( ::fabs(OccGridSize * j - ssm_sokuikiraw.data[i].r) < OccGridSize )	*ppxl += OccLo;
+										if( ( (occ_map.xrsl() * j) - ssm_sokuikiraw.data[i].r) < (-pconf.occ_measurementerror.value) )		*ppxl += occ_freeprob_log;
+										if( ::fabs(occ_map.xrsl() * j - ssm_sokuikiraw.data[i].r) < occ_map.xrsl() )	*ppxl += occ_occupiedprob_log;
 									}
 								}
 							}// <--- update occupancy grid map
@@ -558,8 +556,8 @@ int main(int argc, char* argv[]) {
 			gnd::lkf::build_ndt_map(&stmap, &cnt_smmap, gnd_mm2dist(10));
 		}
 		else {
-			::fprintf(stderr, "  => build lkf map\n");
-			gnd::lkf::build_map(&stmap, &cnt_smmap, gnd_m2dist(20), 1);
+			::fprintf(stderr, "  => build lkf map:  add smooting %lf\n", pconf.lkf_addsmoothparam.value);
+			gnd::lkf::build_map(&stmap, &cnt_smmap, pconf.range_dist.value, pconf.lkf_addsmoothparam.value);
 		}
 
 		if( pconf.lkf_map.value[0] ){ // ---> write lkf map
@@ -609,7 +607,7 @@ int main(int argc, char* argv[]) {
 			gnd::bmp32_t bmp;
 
 			// bmp file building
-			gnd::lkf::build_bmp32(&bmp, &stmap, gnd_m2dist( 1.0 / 20));
+			gnd::lkf::build_bmp32(&bmp, &stmap, gnd_m2dist( pconf.bmp_pixelsize.value));
 			{ // ---> bmp
 				char fname[512];
 				::fprintf(stderr, " => write lkf-image in bmp(32bit)\n");
@@ -647,7 +645,7 @@ int main(int argc, char* argv[]) {
 		if( pconf.bmp.value ) { // ---> bmp (8bit)
 			gnd::bmp8_t bmp8;
 
-			gnd::lkf::build_bmp8(&bmp8, &stmap, gnd_m2dist( 1.0 / 20));
+			gnd::lkf::build_bmp8(&bmp8, &stmap, gnd_m2dist( pconf.bmp_pixelsize.value ));
 			{ // ---> bmp
 				char fname[512];
 				::fprintf(stderr, " => write psm-image in bmp(8bit)\n");
@@ -686,6 +684,7 @@ int main(int argc, char* argv[]) {
 			gnd::bmp8_t bmp8;
 			bmp8.allocate(occ_map.row(), occ_map.column());
 			bmp8.pset_rsl(occ_map.xrsl(), occ_map.yrsl() );
+			bmp8.pset_origin( occ_map.xorg(), occ_map.yorg() );
 
 			for( unsigned long r = 0; r < bmp8.row(); r++ ){
 				for( unsigned long c = 0; c < bmp8.column(); c++ ){
