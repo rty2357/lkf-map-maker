@@ -463,14 +463,40 @@ int main(int argc, char* argv[]) {
 							gnd::vector::fixed_column<3> ws3x1;
 							gnd::matrix::fixed<3,3> ws3x3;
 
+							// ignore error data
+							if( ssm_sokuikiraw.data[i].isError()) 	continue;
+							else if( pconf.range_orient.value > 0 && ssm_sokuikiraw.data[i].th > pconf.range_orient.value )	continue;
+
+
+							if( pconf.occ_map.value ){ // ---> update occupancy grid map
+								double *ppxl;
+								double *prev_ppxl = 0;
+								double measured_range = ssm_sokuikiraw.data[i].status == ssm::laser::STATUS_NO_REFLECTION ? pconf.range_dist.value : ssm_sokuikiraw.data[i].r;
+								size_t n = (measured_range / occ_map.xrsl());
+								if( n > 0 ) {
+									double ux = (reflect_cgl[0] - origin_cgl[0]) / n;
+									double uy = (reflect_cgl[1] - origin_cgl[1]) / n;
+									n = ( (measured_range + pconf.occ_measurementerror.value) / occ_map.xrsl());
+									for(double j = 0; j <= n + 1; j++) {
+										double xpxl = origin_cgl[0] + ux * j;
+										double ypxl = origin_cgl[1] + uy * j;
+
+										for( ppxl = occ_map.ppointer(xpxl, ypxl);
+												ppxl == 0;
+												ppxl = occ_map.ppointer(xpxl, ypxl) ){
+											occ_map.reallocate(xpxl, ypxl);
+										}
+
+										if( ppxl == prev_ppxl ) continue;
+										if( ( (occ_map.xrsl() * j) - measured_range) < (-pconf.occ_measurementerror.value) )		*ppxl += occ_freeprob_log;
+										else if( ::fabs(occ_map.xrsl() * j - measured_range) < occ_map.xrsl() && ssm_sokuikiraw.data[i].status != ssm::laser::STATUS_NO_REFLECTION)	*ppxl += occ_occupiedprob_log;
+									}
+								}
+							}// <--- update occupancy grid map
+
 							// if range data is null because of no reflection
 							if( ssm_sokuikiraw.data[i].status == ssm::laser::STATUS_NO_REFLECTION)	continue;
-							// ignore error data
-							else if( ssm_sokuikiraw.data[i].isError()) 	continue;
-							else if( ssm_sokuikiraw.data[i].r < ssm_sokuikiraw.property.distMin)	continue;
-							else if( ssm_sokuikiraw.data[i].r > ssm_sokuikiraw.property.distMax)	continue;
 							else if( pconf.range_dist.value > 0 && ssm_sokuikiraw.data[i].r > pconf.range_dist.value )		continue;
-							else if( pconf.range_orient.value > 0 && ssm_sokuikiraw.data[i].th > pconf.range_orient.value )	continue;
 
 
 							{ // ---> compute reflection point position on global coordinate
@@ -497,30 +523,6 @@ int main(int argc, char* argv[]) {
 							// add scan point to map
 							gnd::lkf::counting_map(&cnt_smmap, reflect_cgl[0], reflect_cgl[1]);
 
-							if( pconf.occ_map.value ){ // ---> update occupancy grid map
-								double *ppxl;
-								double *prev_ppxl = 0;
-								size_t n = (ssm_sokuikiraw.data[i].r / occ_map.xrsl());
-								if( n > 0 ) {
-									double ux = (reflect_cgl[0] - origin_cgl[0]) / n;
-									double uy = (reflect_cgl[1] - origin_cgl[1]) / n;
-									n = ( (ssm_sokuikiraw.data[i].r + pconf.occ_measurementerror.value) / occ_map.xrsl());
-									for(double j = 0; j <= n + 1; j++) {
-										double xpxl = origin_cgl[0] + ux * j;
-										double ypxl = origin_cgl[1] + uy * j;
-
-										for( ppxl = occ_map.ppointer(xpxl, ypxl);
-												ppxl == 0;
-												ppxl = occ_map.ppointer(xpxl, ypxl) ){
-											occ_map.reallocate(xpxl, ypxl);
-										}
-
-										if( ppxl == prev_ppxl ) continue;
-										if( ( (occ_map.xrsl() * j) - ssm_sokuikiraw.data[i].r) < (-pconf.occ_measurementerror.value) )		*ppxl += occ_freeprob_log;
-										if( ::fabs(occ_map.xrsl() * j - ssm_sokuikiraw.data[i].r) < occ_map.xrsl() )	*ppxl += occ_occupiedprob_log;
-									}
-								}
-							}// <--- update occupancy grid map
 
 							// log
 							if( llog_fp )	::fprintf(llog_fp, "%lf %lf\n", reflect_cgl[0], reflect_cgl[1]);
