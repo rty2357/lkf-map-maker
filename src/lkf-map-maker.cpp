@@ -88,7 +88,7 @@ int main(int argc, char* argv[]) {
 
 		{ // ---> allocate SIGINT to shut-off
 			::proc_shutoff_clear();
-			::proc_shutoff_alloc_signal(SIGINT);
+			::proc_shutoff_alloc_signal(SIGINT, SA_RESTART);
 		} // <--- allocate SIGINT to shut-off
 
 
